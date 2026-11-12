@@ -1,0 +1,31 @@
+SKU_ID,Product_Name,Category,Current_Location,Order_Frequency,Total_Quantity,Demand_Class
+SKU001,Laptop,Computing,A01,12,41,Fast
+SKU006,USB Hub,Accessories,A06,12,40,Fast
+SKU008,Keyboard,Accessories,A08,12,39,Fast
+SKU010,Mouse Pad,Accessories,B02,12,39,Fast
+SKU004,Monitor,Electronics,A04,12,37,Fast
+SKU002,Tablet,Computing,A02,12,35,Fast
+SKU005,Webcam,Electronics,A05,12,34,Fast
+SKU003,Smartphone,Electronics,A03,12,32,Fast
+SKU007,Wireless Mouse,Accessories,A07,12,30,Fast
+SKU009,Laptop Stand,Accessories,B01,12,28,Fast
+SKU018,HDMI Cable,Accessories,C02,6,25,Medium
+SKU020,Ethernet Cable,Accessories,C04,6,22,Medium
+SKU016,Earbuds,Audio,B08,6,20,Medium
+SKU017,Microphone,Audio,C01,6,20,Medium
+SKU012,AA Battery Pack,Battery,B04,6,18,Medium
+SKU019,USB-C Cable,Accessories,C03,6,18,Medium
+SKU011,Power Bank,Battery,B03,6,17,Medium
+SKU013,Rechargeable Battery,Battery,B05,6,17,Medium
+SKU014,Bluetooth Speaker,Audio,B06,6,16,Medium
+SKU015,Headphones,Audio,B07,6,12,Medium
+SKU027,Smartwatch,Electronics,D03,2,7,Slow
+SKU029,Docking Station,Computing,D05,2,7,Slow
+SKU023,Router,Electronics,C07,2,6,Slow
+SKU024,Wi-Fi Adapter,Electronics,C08,2,6,Slow
+SKU021,External SSD,Computing,C05,2,5,Slow
+SKU025,Laptop Charger,Electronics,D01,2,5,Slow
+SKU026,Phone Charger,Electronics,D02,2,5,Slow
+SKU022,Flash Drive,Computing,C06,2,4,Slow
+SKU028,Graphics Tablet,Computing,D04,2,4,Slow
+SKU030,Portable SSD,Computing,D06,2,4,Slow

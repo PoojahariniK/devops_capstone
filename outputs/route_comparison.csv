@@ -1,0 +1,51 @@
+Order_ID,Baseline_Distance,Optimized_Distance,Distance_Saved,Pct_Distance_Reduction,Baseline_Time_Sec,Optimized_Time_Sec,Time_Saved_Sec,Route_Status,Notes
+ORD024,130.0,110.0,20.0,15.38,168.33,151.67,16.66,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (15.4%)
+ORD004,120.0,120.0,0.0,0.0,160.0,160.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD008,130.0,110.0,20.0,15.38,168.33,151.67,16.66,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (15.4%)
+ORD040,150.0,100.0,50.0,33.33,185.0,143.33,41.67,IMPROVED,Nearest Neighbor reduced travel distance by 50.00 (33.3%)
+ORD033,150.0,120.0,30.0,20.0,185.0,160.0,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (20.0%)
+ORD029,130.0,90.0,40.0,30.77,168.33,135.0,33.33,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (30.8%)
+ORD018,160.0,130.0,30.0,18.75,193.33,168.33,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (18.8%)
+ORD043,120.0,120.0,0.0,0.0,160.0,160.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD044,140.0,110.0,30.0,21.43,176.67,151.67,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (21.4%)
+ORD012,90.0,90.0,0.0,0.0,135.0,135.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD017,120.0,90.0,30.0,25.0,160.0,135.0,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (25.0%)
+ORD046,130.0,110.0,20.0,15.38,168.33,151.67,16.66,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (15.4%)
+ORD042,150.0,150.0,0.0,0.0,185.0,185.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD020,130.0,80.0,50.0,38.46,168.33,126.67,41.66,IMPROVED,Nearest Neighbor reduced travel distance by 50.00 (38.5%)
+ORD047,130.0,140.0,-10.0,-7.69,168.33,176.67,-8.34,WORSE,Nearest Neighbor heuristic performed WORSE than baseline by 10.00 (7.7% longer) due to greedy local choice causing suboptimal return leg.
+ORD045,110.0,110.0,0.0,0.0,151.67,151.67,0.0,IDENTICAL,Route distance identical to baseline
+ORD015,110.0,90.0,20.0,18.18,151.67,135.0,16.67,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (18.2%)
+ORD039,150.0,110.0,40.0,26.67,185.0,151.67,33.33,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (26.7%)
+ORD021,120.0,120.0,0.0,0.0,160.0,160.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD032,140.0,110.0,30.0,21.43,176.67,151.67,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (21.4%)
+ORD005,50.0,50.0,0.0,0.0,101.67,101.67,0.0,IDENTICAL,Route distance identical to baseline
+ORD038,130.0,140.0,-10.0,-7.69,168.33,176.67,-8.34,WORSE,Nearest Neighbor heuristic performed WORSE than baseline by 10.00 (7.7% longer) due to greedy local choice causing suboptimal return leg.
+ORD016,80.0,70.0,10.0,12.5,126.67,118.33,8.34,IMPROVED,Nearest Neighbor reduced travel distance by 10.00 (12.5%)
+ORD022,90.0,70.0,20.0,22.22,135.0,118.33,16.67,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (22.2%)
+ORD034,130.0,100.0,30.0,23.08,168.33,143.33,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (23.1%)
+ORD003,150.0,90.0,60.0,40.0,185.0,135.0,50.0,IMPROVED,Nearest Neighbor reduced travel distance by 60.00 (40.0%)
+ORD014,150.0,100.0,50.0,33.33,185.0,143.33,41.67,IMPROVED,Nearest Neighbor reduced travel distance by 50.00 (33.3%)
+ORD019,160.0,120.0,40.0,25.0,193.33,160.0,33.33,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (25.0%)
+ORD027,110.0,70.0,40.0,36.36,151.67,118.33,33.34,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (36.4%)
+ORD035,150.0,110.0,40.0,26.67,185.0,151.67,33.33,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (26.7%)
+ORD050,90.0,70.0,20.0,22.22,135.0,118.33,16.67,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (22.2%)
+ORD010,140.0,100.0,40.0,28.57,176.67,143.33,33.34,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (28.6%)
+ORD007,180.0,100.0,80.0,44.44,210.0,143.33,66.67,IMPROVED,Nearest Neighbor reduced travel distance by 80.00 (44.4%)
+ORD031,130.0,130.0,0.0,0.0,168.33,168.33,0.0,IDENTICAL,Route distance identical to baseline
+ORD049,70.0,70.0,0.0,0.0,118.33,118.33,0.0,IDENTICAL,Route distance identical to baseline
+ORD036,90.0,60.0,30.0,33.33,135.0,110.0,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (33.3%)
+ORD002,120.0,120.0,0.0,0.0,160.0,160.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD030,120.0,110.0,10.0,8.33,160.0,151.67,8.33,IMPROVED,Nearest Neighbor reduced travel distance by 10.00 (8.3%)
+ORD025,90.0,90.0,0.0,0.0,135.0,135.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD009,70.0,60.0,10.0,14.29,118.33,110.0,8.33,IMPROVED,Nearest Neighbor reduced travel distance by 10.00 (14.3%)
+ORD011,60.0,60.0,0.0,0.0,110.0,110.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD048,90.0,90.0,0.0,0.0,135.0,135.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD023,160.0,130.0,30.0,18.75,193.33,168.33,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (18.8%)
+ORD013,190.0,110.0,80.0,42.11,218.33,151.67,66.66,IMPROVED,Nearest Neighbor reduced travel distance by 80.00 (42.1%)
+ORD041,160.0,130.0,30.0,18.75,193.33,168.33,25.0,IMPROVED,Nearest Neighbor reduced travel distance by 30.00 (18.8%)
+ORD026,90.0,90.0,0.0,0.0,135.0,135.0,0.0,IDENTICAL,Route distance identical to baseline
+ORD028,80.0,80.0,0.0,0.0,126.67,126.67,0.0,IDENTICAL,Route distance identical to baseline
+ORD001,140.0,100.0,40.0,28.57,176.67,143.33,33.34,IMPROVED,Nearest Neighbor reduced travel distance by 40.00 (28.6%)
+ORD006,100.0,100.0,0.0,0.0,143.33,143.33,0.0,IDENTICAL,Route distance identical to baseline
+ORD037,130.0,110.0,20.0,15.38,168.33,151.67,16.66,IMPROVED,Nearest Neighbor reduced travel distance by 20.00 (15.4%)

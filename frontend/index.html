@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAP-12 Warehouse Slotting & Pick-Path Optimization</title>
+  <link rel="stylesheet" href="../src/App.css" />
+  <link rel="stylesheet" href="App.css" />
+  <!-- React 18, ReactDOM 18, Babel Standalone & Axios -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/axios@1.7.0/dist/axios.min.js"></script>
+  <!-- Seed Data for Zero-Configuration Offline Preview -->
+  <script src="seed_data.js"></script>
+  <style>
+    /* In case App.css path differs when loaded directly */
+    :root {
+      --bg-primary: #0f172a;
+      --bg-secondary: #1e293b;
+      --bg-card: #1e293b;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --accent-blue: #38bdf8;
+      --border-color: #334155;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div style="padding: 3rem; text-align: center; color: #94a3b8; font-family: sans-serif;">
+      <div style="border: 3px solid rgba(255, 255, 255, 0.1); border-top: 3px solid #38bdf8; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s linear infinite; margin: 0 auto 1rem;"></div>
+      <h2>Initializing CAP-12 Warehouse Optimization Dashboard...</h2>
+      <p style="margin-top: 0.5rem; font-size: 0.9rem;">Connecting to Spring Boot REST API (port 8080) & Snowflake Data Layer...</p>
+    </div>
+  </div>
+
+  <!-- Standalone Bundled Script for Seamless Browser Execution -->
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    // --- API CLIENT ---
+    const API_BASE_URL = 'http://localhost:8080/api';
+
+    async function apiRequest(path, options = {}) {
+      const url = `${API_BASE_URL}${path}`;
+      if (window.axios) {
+        try {
+          const resp = await window.axios({
+            url,
+            method: options.method || 'GET',
+            data: options.body ? JSON.parse(options.body) : undefined,
+            headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+          });
+          return resp.data;
+        } catch (err) {
+          if (err.response && err.response.data) {
+            throw new Error(err.response.data.message || err.response.statusText);
+          }
+          throw err;
+        }
+      }
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.message || `HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    const warehouseApi = {
+      getProducts: () => apiRequest('/products'),
+      getLocations: () => apiRequest('/locations'),
+      getDemand: () => apiRequest('/demand'),
+      getSlotRecommendations: () => apiRequest('/slots/recommendations'),
+      approveSlot: (id) => apiRequest(`/slots/approve/${id}`, { method: 'POST' }),
+      rejectSlot: (id) => apiRequest(`/slots/reject/${id}`, { method: 'POST' }),
+      getAllRoutes: () => apiRequest('/routes'),
+      getReplenishmentAlerts: () => apiRequest('/replenishment'),
+      getAnalytics: () => apiRequest('/analytics'),
+    };
+
+    // --- HEADER COMPONENT ---
+    function Header({ analytics, backendOnline }) {
+      return (
+        <header className="header">
+          <div className="header-title-group">
+            <h1>
+              <span>📦 CAP-12 Warehouse Optimization</span>
+              <span className="header-badge">Decision Support</span>
+            </h1>
+            <p className="header-subtitle">
+              Intelligent Warehouse Slotting, Demand Profiling & Pick-Path Routing Dashboard
+            </p>
+          </div>
+          <div className="header-status">
+            <div className="status-pill">
+              <span className="status-indicator" style={{ backgroundColor: backendOnline ? '#22c55e' : '#f59e0b' }}></span>
+              <span>Backend: {backendOnline ? 'Online (REST API :8080)' : 'Standalone Preview (Seed Active)'}</span>
+            </div>
+            <div className="status-pill">
+              <span>Snowflake Schema: <strong>CLEAN</strong></span>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    // --- NAVBAR COMPONENT ---
+    function Navbar({ activeTab, setActiveTab, counts }) {
+      const tabs = [
+        { id: 'overview', label: '1. Overview' },
+        { id: 'products', label: '2. Product Master', count: counts.products },
+        { id: 'locations', label: '3. Warehouse Grid', count: counts.locations },
+        { id: 'demand', label: '4. Demand Profile', count: counts.demand },
+        { id: 'recommendations', label: '5. Slotting Engine', count: counts.recommendations },
+        { id: 'pickpath', label: '6. Pick-Path Routing', count: counts.routes },
+        { id: 'replenishment', label: '7. Replenishment', count: counts.replenishment, alert: counts.replenishment > 0 },
+        { id: 'approval', label: '8. Supervisor Approval', count: counts.pendingApproval, success: true },
+        { id: 'analytics', label: '9. Performance KPIs' },
+      ];
+
+      return (
+        <nav className="nav-tabs">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              className={`nav-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+              {tab.count !== undefined && (
+                <span className={`tab-badge ${tab.alert ? 'alert' : tab.success ? 'success' : ''}`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      );
+    }
+
+    // --- 1. OVERVIEW COMPONENT ---
+    function WarehouseOverview({ analytics }) {
+      if (!analytics) return <div className="state-container"><div className="spinner"></div>Loading overview...</div>;
+      return (
+        <div>
+          <div className="kpi-grid">
+            <div className="kpi-card">
+              <span className="kpi-label">Total SKUs</span>
+              <span className="kpi-value">{analytics.totalProducts}</span>
+              <span className="kpi-subtext">Active Master Catalog</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Storage Locations</span>
+              <span className="kpi-value">{analytics.totalLocations}</span>
+              <span className="kpi-subtext">
+                {analytics.occupiedLocations} Occupied · <strong style={{ color: '#4ade80' }}>{analytics.emptyLocations} Empty</strong>
+              </span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Demand Segments</span>
+              <span className="kpi-value">{analytics.fastProducts} / {analytics.mediumProducts} / {analytics.slowProducts}</span>
+              <span className="kpi-subtext">Fast (≥10) · Med (4-9) · Slow (&lt;4)</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Mean Distance Reduction</span>
+              <span className="kpi-value" style={{ color: '#38bdf8' }}>
+                {analytics.averageDistanceReductionPct}%
+              </span>
+              <span className="kpi-subtext positive">Total Saved: {analytics.totalDistanceSaved} units</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Replenishment Alerts</span>
+              <span className="kpi-value" style={{ color: analytics.replenishmentAlertsCount > 0 ? '#f87171' : '#4ade80' }}>
+                {analytics.replenishmentAlertsCount}
+              </span>
+              <span className="kpi-subtext warning">Action Required Immediately</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Supervisor Approvals</span>
+              <span className="kpi-value">
+                {analytics.approvedSlotsCount} <span style={{ fontSize: '1rem', color: '#94a3b8' }}>approved</span>
+              </span>
+              <span className="kpi-subtext">
+                {analytics.recommendedSlotsCount} candidate slots pending review
+              </span>
+            </div>
+          </div>
+
+          <div className="section-card">
+            <div className="section-header">
+              <div>
+                <h2 className="section-title">Warehouse Operational Status</h2>
+                <p className="section-desc">Real-time facility utilization and optimization objectives</p>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', color: '#38bdf8' }}>Optimization Objectives</h3>
+                <ul style={{ listStyleType: 'disc', paddingLeft: '1.2rem', color: '#94a3b8', fontSize: '0.85rem', lineHeight: '1.6' }}>
+                  <li><strong>Slotting Optimization:</strong> Position fast-moving items closer to dispatch point while strictly enforcing storage capacity and category compatibility.</li>
+                  <li><strong>Pick-Path Routing:</strong> Reduce picker travel distance and picking time using Nearest Neighbor heuristic across historical order batches.</li>
+                  <li><strong>Supervisor Governance:</strong> Retain strict human-in-the-loop approvals before updating physical bin allocations.</li>
+                  <li><strong>Honest Heuristic Auditing:</strong> Transparently flag suboptimal edge cases where greedy heuristic underperforms the baseline.</li>
+                </ul>
+              </div>
+              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', color: '#38bdf8' }}>Warehouse Occupancy Rate</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                  <span>Occupied: <strong>{analytics.occupiedLocations} / {analytics.totalLocations}</strong></span>
+                  <span><strong>{Math.round((analytics.occupiedLocations / analytics.totalLocations) * 100)}%</strong></span>
+                </div>
+                <div className="progress-bar-bg" style={{ height: '12px' }}>
+                  <div className="progress-bar-fill" style={{ width: `${(analytics.occupiedLocations / analytics.totalLocations) * 100}%`, backgroundColor: '#6366f1' }}></div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                  <span>Available Capacity Slots:</span>
+                  <span style={{ color: '#4ade80', fontWeight: 'bold' }}>{analytics.emptyLocations} Empty Slots</span>
+                </div>
+                <div className="progress-bar-bg" style={{ height: '12px' }}>
+                  <div className="progress-bar-fill" style={{ width: `${(analytics.emptyLocations / analytics.totalLocations) * 100}%`, backgroundColor: '#22c55e' }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 2. PRODUCT MASTER COMPONENT ---
+    function ProductMaster({ products }) {
+      const [searchTerm, setSearchTerm] = useState('');
+      const [categoryFilter, setCategoryFilter] = useState('ALL');
+
+      if (!products) return <div className="state-container"><div className="spinner"></div>Loading products...</div>;
+
+      const categories = ['ALL', ...new Set(products.map(p => p.category))];
+      const filtered = products.filter(p => {
+        const matchesSearch = p.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              p.skuId.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesCat = categoryFilter === 'ALL' || p.category === categoryFilter;
+        return matchesSearch && matchesCat;
+      });
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">2. Product Catalog & Current Storage Locations</h2>
+              <p className="section-desc">30 SKU master inventory records loaded from CLEAN.PRODUCTS</p>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="Search SKU or Product..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                style={{ background: '#0f172a', border: '1px solid #334155', color: '#f8fafc', padding: '0.45rem 0.8rem', borderRadius: '6px', fontSize: '0.85rem' }}
+              />
+              <select
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
+                style={{ background: '#0f172a', border: '1px solid #334155', color: '#f8fafc', padding: '0.45rem 0.8rem', borderRadius: '6px', fontSize: '0.85rem' }}
+              >
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>SKU ID</th>
+                  <th>Product Name</th>
+                  <th>Category</th>
+                  <th>Required Capacity</th>
+                  <th>Current Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(p => (
+                  <tr key={p.skuId}>
+                    <td><strong>{p.skuId}</strong></td>
+                    <td>{p.productName}</td>
+                    <td><span className="badge" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>{p.category}</span></td>
+                    <td>{p.requiredCapacity} units</td>
+                    <td><span className="badge badge-occupied">{p.currentLocation}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 3. WAREHOUSE LOCATIONS GRID ---
+    function WarehouseLocations({ locations, onVacateLocation }) {
+      const [selectedLoc, setSelectedLoc] = useState(null);
+      if (!locations) return <div className="state-container"><div className="spinner"></div>Loading locations...</div>;
+
+      const aisles = ['A', 'B', 'C', 'D', 'E'];
+      const byAisle = {};
+      aisles.forEach(a => {
+        byAisle[a] = locations.filter(l => l.aisle === a).sort((x, y) => x.locationId.localeCompare(y.locationId));
+      });
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">3. Warehouse Physical Layout Grid (40 Locations)</h2>
+              <p className="section-desc">5 Aisles (A-E) x 8 Slots each. Click any bin to inspect physical coordinates, capacity, or vacate an occupied slot.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                <span style={{ width: '12px', height: '12px', backgroundColor: '#6366f1', borderRadius: '3px', display: 'inline-block' }}></span>
+                <span>Occupied ({locations.filter(l => l.status === 'OCCUPIED').length})</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                <span style={{ width: '12px', height: '12px', backgroundColor: '#22c55e', borderRadius: '3px', display: 'inline-block' }}></span>
+                <span>Available Empty ({locations.filter(l => l.status === 'EMPTY').length})</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="warehouse-aisle-container">
+            {aisles.map(aisle => (
+              <div key={aisle} className="aisle-row">
+                <div className="aisle-label">Aisle {aisle}</div>
+                <div className="aisle-slots">
+                  {byAisle[aisle].map(loc => {
+                    const isEmpty = loc.status === 'EMPTY';
+                    return (
+                      <div
+                        key={loc.locationId}
+                        className={`slot-box ${isEmpty ? 'empty' : 'occupied'}`}
+                        onClick={() => setSelectedLoc(loc)}
+                        style={{ outline: selectedLoc && selectedLoc.locationId === loc.locationId ? '2px solid #38bdf8' : 'none' }}
+                      >
+                        <div className="slot-id" style={{ color: isEmpty ? '#4ade80' : '#818cf8' }}>{loc.locationId}</div>
+                        <div className="slot-meta">({loc.x}, {loc.y})</div>
+                        <div className="slot-meta" style={{ fontSize: '0.65rem' }}>Cap: {loc.capacity}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {selectedLoc && (
+            <div style={{ marginTop: '1.5rem', background: '#0f172a', padding: '1rem 1.5rem', borderRadius: '8px', border: '1px solid #38bdf8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <strong>Selected Location: {selectedLoc.locationId}</strong> (Aisle {selectedLoc.aisle}) · Status: <span style={{ color: selectedLoc.status === 'EMPTY' ? '#4ade80' : '#818cf8', fontWeight: 'bold' }}>{selectedLoc.status}</span>
+                <span style={{ marginLeft: '1rem', color: '#94a3b8' }}>Coords: ({selectedLoc.x}, {selectedLoc.y}) · Capacity: {selectedLoc.capacity} · Allowed Category: {selectedLoc.allowedCategory}</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {selectedLoc.status === 'OCCUPIED' && onVacateLocation && (
+                  <button
+                    className="btn btn-reject"
+                    style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
+                    onClick={() => {
+                      onVacateLocation(selectedLoc.locationId);
+                      setSelectedLoc(prev => ({ ...prev, status: 'EMPTY' }));
+                    }}
+                  >
+                    🗑️ Vacate Slot (Remove Stock)
+                  </button>
+                )}
+                <button className="btn" onClick={() => setSelectedLoc(null)} style={{ background: '#334155', color: '#f8fafc' }}>Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- 4. DEMAND CLASSIFICATION COMPONENT ---
+    function DemandClassification({ demand }) {
+      const [classFilter, setClassFilter] = useState('ALL');
+      if (!demand) return <div className="state-container"><div className="spinner"></div>Loading demand...</div>;
+
+      const filtered = classFilter === 'ALL' ? demand : demand.filter(d => d.demandClass === classFilter);
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">4. SKU Demand Classification (Fast / Medium / Slow)</h2>
+              <p className="section-desc">Classified by Order Frequency: Fast (≥10 orders), Medium (4-9 orders), Slow (&lt;4 orders)</p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {['ALL', 'FAST', 'MEDIUM', 'SLOW'].map(c => (
+                <button
+                  key={c}
+                  className="btn"
+                  onClick={() => setClassFilter(c)}
+                  style={{
+                    background: classFilter === c ? '#38bdf8' : '#1e293b',
+                    color: classFilter === c ? '#0f172a' : '#f8fafc',
+                    border: '1px solid #334155'
+                  }}
+                >
+                  {c} {c !== 'ALL' && `(${demand.filter(d => d.demandClass === c).length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>SKU ID</th>
+                  <th>Product Name</th>
+                  <th>Category</th>
+                  <th>Order Frequency</th>
+                  <th>Total Quantity Ordered</th>
+                  <th>Demand Classification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(d => (
+                  <tr key={d.skuId}>
+                    <td><strong>{d.skuId}</strong></td>
+                    <td>{d.productName}</td>
+                    <td>{d.category}</td>
+                    <td><strong>{d.orderFrequency}</strong> orders</td>
+                    <td>{d.totalQuantity} units</td>
+                    <td>
+                      <span className={`badge badge-${d.demandClass.toLowerCase()}`}>
+                        {d.demandClass}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 5. SLOT RECOMMENDATIONS COMPONENT ---
+    function SlotRecommendations({ recommendations, onApprove, onReject }) {
+      const [filter, setFilter] = useState('ALL');
+      if (!recommendations) return <div className="state-container"><div className="spinner"></div>Loading recommendations...</div>;
+
+      const filtered = filter === 'ALL' ? recommendations : recommendations.filter(r => r.recommendationStatus === filter);
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">5. Storage Slotting Recommender Engine</h2>
+              <p className="section-desc">Evaluated against the 10 empty locations with capacity, category compatibility and proximity rules</p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {['ALL', 'RECOMMENDED', 'NO_FEASIBLE_LOCATION', 'APPROVED', 'REJECTED'].map(s => (
+                <button
+                  key={s}
+                  className="btn"
+                  onClick={() => setFilter(s)}
+                  style={{
+                    background: filter === s ? '#38bdf8' : '#1e293b',
+                    color: filter === s ? '#0f172a' : '#f8fafc',
+                    border: '1px solid #334155'
+                  }}
+                >
+                  {s.replace(/_/g, ' ')} ({recommendations.filter(r => s === 'ALL' || r.recommendationStatus === s).length})
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Rec ID</th>
+                  <th>SKU</th>
+                  <th>Product</th>
+                  <th>Class</th>
+                  <th>Current Bin</th>
+                  <th>Candidate Bin</th>
+                  <th>Distance</th>
+                  <th>Status</th>
+                  <th>Explainable Reason</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.recommendationId}>
+                    <td><strong>{r.recommendationId}</strong></td>
+                    <td>{r.skuId}</td>
+                    <td>{r.productName}</td>
+                    <td><span className={`badge badge-${r.demandClass.toLowerCase()}`}>{r.demandClass}</span></td>
+                    <td><span className="badge badge-occupied">{r.currentLocation}</span></td>
+                    <td>
+                      {r.recommendedLocation !== 'NONE'
+                        ? <span className="badge badge-empty">{r.recommendedLocation}</span>
+                        : <span style={{ color: '#94a3b8' }}>—</span>}
+                    </td>
+                    <td>{r.distance > 0 ? `${r.distance} units` : '—'}</td>
+                    <td>
+                      <span className="badge" style={{
+                        backgroundColor: r.recommendationStatus === 'APPROVED' ? 'rgba(34,197,94,0.2)' :
+                                         r.recommendationStatus === 'REJECTED' ? 'rgba(239,68,68,0.2)' :
+                                         r.recommendationStatus === 'RECOMMENDED' ? 'rgba(56,189,248,0.2)' : 'rgba(245,158,11,0.2)',
+                        color: r.recommendationStatus === 'APPROVED' ? '#4ade80' :
+                               r.recommendationStatus === 'REJECTED' ? '#f87171' :
+                               r.recommendationStatus === 'RECOMMENDED' ? '#38bdf8' : '#fbbf24'
+                      }}>
+                        {r.recommendationStatus}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: '320px' }}>{r.reason}</td>
+                    <td>
+                      {r.recommendationStatus === 'RECOMMENDED' ? (
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <button className="btn btn-approve" style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }} onClick={() => onApprove(r.recommendationId)}>Approve</button>
+                          <button className="btn btn-reject" style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }} onClick={() => onReject(r.recommendationId)}>Reject</button>
+                        </div>
+                      ) : <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Resolved</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 6. PICK PATH OPTIMIZATION COMPONENT ---
+    function PickPathOptimization({ routes, products, locations }) {
+      const [selectedOrderId, setSelectedOrderId] = useState('ORD001');
+      const [filterWorse, setFilterWorse] = useState(false);
+
+      // Ad-Hoc Simulation States
+      const [customSkus, setCustomSkus] = useState(['SKU001', 'SKU014', 'SKU025', 'SKU009']);
+      const [simResult, setSimResult] = useState(null);
+
+      if (!routes || routes.length === 0) return <div className="state-container"><div className="spinner"></div>Loading routes...</div>;
+
+      const selectedRoute = routes.find(r => r.orderId === selectedOrderId) || routes[0];
+      const worseCases = routes.filter(r => r.routeStatus === 'WORSE');
+      const displayList = filterWorse ? worseCases : routes;
+
+      // Real-time Euclidean Distance
+      const calcDist = (p1, p2) => Math.sqrt(Math.pow(p2[0] - p1[0], 2) + Math.pow(p2[1] - p1[1], 2));
+
+      // Real-time Pick-Path Calculation
+      const runCustomSimulation = () => {
+        if (!products || !locations || customSkus.length === 0) return;
+
+        // Build SKU coordinate map
+        const locMap = {};
+        locations.forEach(l => { locMap[l.locationId] = [l.x, l.y]; });
+
+        const skuMap = {};
+        products.forEach(p => {
+          skuMap[p.skuId] = {
+            name: p.productName,
+            loc: p.currentLocation,
+            coord: locMap[p.currentLocation] || [0, 0]
+          };
+        });
+
+        const stops = [];
+        const seenLocs = [];
+        customSkus.forEach(s => {
+          if (skuMap[s]) {
+            const locId = skuMap[s].loc;
+            if (!seenLocs.includes(locId)) {
+              seenLocs.push(locId);
+              stops.push({ sku: s, loc: locId, coord: skuMap[s].coord });
+            }
+          }
+        });
+
+        if (stops.length === 0) return;
+
+        const dispatch = [0, 0];
+
+        // 1. Baseline Sequential Tour
+        let baseDist = 0;
+        let curr = dispatch;
+        stops.forEach(st => {
+          baseDist += calcDist(curr, st.coord);
+          curr = st.coord;
+        });
+        baseDist += calcDist(curr, dispatch);
+        const baseTime = (baseDist / 1.2) + (stops.length * 15);
+        const baseSeq = 'START(0,0) -> ' + stops.map(s => s.loc).join(' -> ') + ' -> END(0,0)';
+
+        // 2. Nearest Neighbor Tour
+        let unvisited = [...stops];
+        let nnDist = 0;
+        let currNn = dispatch;
+        const nnSequence = [];
+
+        while (unvisited.length > 0) {
+          let nearestIdx = 0;
+          let minDist = Infinity;
+          for (let i = 0; i < unvisited.length; i++) {
+            const d = calcDist(currNn, unvisited[i].coord);
+            if (d < minDist) {
+              minDist = d;
+              nearestIdx = i;
+            }
+          }
+          nnDist += minDist;
+          currNn = unvisited[nearestIdx].coord;
+          nnSequence.push(unvisited[nearestIdx].loc);
+          unvisited.splice(nearestIdx, 1);
+        }
+        nnDist += calcDist(currNn, dispatch);
+        const nnTime = (nnDist / 1.2) + (stops.length * 15);
+        const nnSeq = 'START(0,0) -> ' + nnSequence.join(' -> ') + ' -> END(0,0)';
+
+        const distSaved = Number((baseDist - nnDist).toFixed(2));
+        const pctReduction = baseDist > 0 ? Number(((distSaved / baseDist) * 100).toFixed(2)) : 0;
+        const timeSaved = Number((baseTime - nnTime).toFixed(2));
+        const status = distSaved > 0 ? 'IMPROVED' : (distSaved < 0 ? 'WORSE' : 'IDENTICAL');
+
+        setSimResult({
+          skus: customSkus,
+          stopsCount: stops.length,
+          baseDist: Number(baseDist.toFixed(2)),
+          baseTime: Number(baseTime.toFixed(1)),
+          baseSeq,
+          nnDist: Number(nnDist.toFixed(2)),
+          nnTime: Number(nnTime.toFixed(1)),
+          nnSeq,
+          distSaved,
+          pctReduction,
+          timeSaved,
+          status
+        });
+      };
+
+      const toggleCustomSku = (skuId) => {
+        setCustomSkus(prev =>
+          prev.includes(skuId) ? prev.filter(s => s !== skuId) : [...prev, skuId]
+        );
+      };
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">6. Pick-Path Optimization & Routing Engine</h2>
+              <p className="section-desc">Baseline sequential pick path vs Nearest Neighbor heuristic path across historical orders</p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <button
+                className="btn"
+                onClick={() => setFilterWorse(!filterWorse)}
+                style={{
+                  background: filterWorse ? 'rgba(239, 68, 68, 0.3)' : '#1e293b',
+                  color: filterWorse ? '#f87171' : '#94a3b8',
+                  border: '1px solid #ef4444'
+                }}
+              >
+                ⚠️ {filterWorse ? 'Showing Suboptimal Cases Only (5)' : `Show Suboptimal Edge Cases (${worseCases.length})`}
+              </button>
+              <select
+                value={selectedOrderId}
+                onChange={e => setSelectedOrderId(e.target.value)}
+                style={{ background: '#0f172a', border: '1px solid #38bdf8', color: '#f8fafc', padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.9rem', fontWeight: '600' }}
+              >
+                {displayList.map(r => (
+                  <option key={r.orderId} value={r.orderId}>
+                    {r.orderId} - {r.routeStatus} ({r.pctDistanceReduction > 0 ? `-${r.pctDistanceReduction}%` : `+${Math.abs(r.pctDistanceReduction)}%`})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedRoute && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
+              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Baseline Sequential Route</span>
+                <div style={{ fontSize: '1.75rem', fontWeight: '700', color: '#f8fafc', marginTop: '0.25rem' }}>
+                  {selectedRoute.baselineDistance} <span style={{ fontSize: '1rem', color: '#94a3b8' }}>units</span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.5rem' }}>
+                  Est. Time: <strong>{selectedRoute.baselineTimeSec}s</strong> (Walk: 1.2 u/s + 15s/pick)
+                </div>
+                <div className="route-sequence-box" style={{ borderColor: '#64748b', color: '#cbd5e1' }}>
+                  {selectedRoute.baselineRouteSequence}
+                </div>
+              </div>
+
+              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', border: `1px solid ${selectedRoute.routeStatus === 'WORSE' ? '#ef4444' : '#38bdf8'}` }}>
+                <span style={{ fontSize: '0.75rem', color: selectedRoute.routeStatus === 'WORSE' ? '#f87171' : '#38bdf8', textTransform: 'uppercase', fontWeight: '600' }}>
+                  Optimized (Nearest Neighbor)
+                </span>
+                <div style={{ fontSize: '1.75rem', fontWeight: '700', color: selectedRoute.routeStatus === 'WORSE' ? '#f87171' : '#38bdf8', marginTop: '0.25rem' }}>
+                  {selectedRoute.optimizedDistance} <span style={{ fontSize: '1rem', color: '#94a3b8' }}>units</span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.5rem' }}>
+                  Est. Time: <strong>{selectedRoute.optimizedTimeSec}s</strong> ({selectedRoute.timeSavedSec > 0 ? `Saved: ${selectedRoute.timeSavedSec}s` : `Added: ${Math.abs(selectedRoute.timeSavedSec)}s`})
+                </div>
+                <div className="route-sequence-box" style={{ borderColor: selectedRoute.routeStatus === 'WORSE' ? '#ef4444' : '#38bdf8' }}>
+                  {selectedRoute.optimizedRouteSequence}
+                </div>
+              </div>
+
+              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase' }}>Variance & Status</span>
+                <div style={{ fontSize: '1.75rem', fontWeight: '700', color: selectedRoute.distanceSaved >= 0 ? '#4ade80' : '#f87171', marginTop: '0.25rem' }}>
+                  {selectedRoute.pctDistanceReduction}%
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.5rem' }}>
+                  Distance Saved: <strong>{selectedRoute.distanceSaved > 0 ? `+${selectedRoute.distanceSaved}` : selectedRoute.distanceSaved} units</strong>
+                </div>
+                <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: selectedRoute.routeStatus === 'WORSE' ? '#fca5a5' : '#94a3b8' }}>
+                  {selectedRoute.notes}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', color: '#f8fafc' }}>Batch Order Pick-Path Comparison Table (50 Orders)</h3>
+          <div className="table-responsive" style={{ maxHeight: '300px' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Baseline Dist</th>
+                  <th>Optimized Dist</th>
+                  <th>Distance Saved</th>
+                  <th>Reduction %</th>
+                  <th>Baseline Time</th>
+                  <th>Optimized Time</th>
+                  <th>Result Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayList.map(r => (
+                  <tr
+                    key={r.orderId}
+                    onClick={() => setSelectedOrderId(r.orderId)}
+                    style={{ cursor: 'pointer', background: r.orderId === selectedOrderId ? 'rgba(56, 189, 248, 0.08)' : 'transparent' }}
+                  >
+                    <td><strong>{r.orderId}</strong></td>
+                    <td>{r.baselineDistance}</td>
+                    <td>{r.optimizedDistance}</td>
+                    <td style={{ color: r.distanceSaved > 0 ? '#4ade80' : r.distanceSaved < 0 ? '#f87171' : '#94a3b8', fontWeight: '600' }}>
+                      {r.distanceSaved > 0 ? `+${r.distanceSaved}` : r.distanceSaved}
+                    </td>
+                    <td>
+                      <span className={`badge ${r.pctDistanceReduction > 0 ? 'badge-improved' : r.pctDistanceReduction < 0 ? 'badge-worse' : ''}`}>
+                        {r.pctDistanceReduction}%
+                      </span>
+                    </td>
+                    <td>{r.baselineTimeSec}s</td>
+                    <td>{r.optimizedTimeSec}s</td>
+                    <td>
+                      <span className={`badge ${r.routeStatus === 'IMPROVED' ? 'badge-improved' : r.routeStatus === 'WORSE' ? 'badge-worse' : ''}`}>
+                        {r.routeStatus}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Interactive Custom Order Simulator */}
+          <div style={{ marginTop: '2rem', padding: '1.25rem', background: '#0f172a', borderRadius: '8px', border: '1px solid #38bdf8' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h3 style={{ color: '#38bdf8', fontSize: '1.1rem' }}>⚡ Ad-Hoc Order Routing Simulator (Add New Order)</h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Select custom products below and compute the optimal pick path dynamically!</p>
+              </div>
+              <button className="btn" onClick={runCustomSimulation} style={{ background: '#38bdf8', color: '#0f172a', fontWeight: 'bold' }}>
+                Run Dynamic Route Calculation
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem', maxHeight: '120px', overflowY: 'auto', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '6px' }}>
+              {(products || []).map(p => {
+                const selected = customSkus.includes(p.skuId);
+                return (
+                  <button
+                    key={p.skuId}
+                    className="btn"
+                    onClick={() => toggleCustomSku(p.skuId)}
+                    style={{
+                      padding: '0.25rem 0.6rem',
+                      fontSize: '0.75rem',
+                      background: selected ? 'rgba(56, 189, 248, 0.25)' : '#1e293b',
+                      color: selected ? '#38bdf8' : '#94a3b8',
+                      border: `1px solid ${selected ? '#38bdf8' : '#334155'}`
+                    }}
+                  >
+                    {selected ? '✓ ' : '+ '}{p.skuId} ({p.productName})
+                  </button>
+                );
+              })}
+            </div>
+
+            {simResult && (
+              <div style={{ background: 'rgba(56, 189, 248, 0.05)', padding: '1rem', borderRadius: '6px', border: '1px dashed #38bdf8' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#f8fafc' }}>Simulation Result ({simResult.stopsCount} Distinct Locations Visited):</span>
+                  <span className={`badge ${simResult.status === 'IMPROVED' ? 'badge-improved' : simResult.status === 'WORSE' ? 'badge-worse' : ''}`}>
+                    {simResult.status} ({simResult.pctReduction > 0 ? `-${simResult.pctReduction}%` : `+${Math.abs(simResult.pctReduction)}%`})
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.6' }}>
+                  <div><strong>Baseline Sequential:</strong> {simResult.baseDist} units ({simResult.baseTime}s) &rarr; <span style={{ color: '#94a3b8' }}>{simResult.baseSeq}</span></div>
+                  <div><strong>Nearest Neighbor:</strong> <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>{simResult.nnDist} units</span> ({simResult.nnTime}s) &rarr; <span style={{ color: '#38bdf8' }}>{simResult.nnSeq}</span></div>
+                  <div style={{ marginTop: '0.3rem', color: simResult.distSaved >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                    Travel Distance Saved: {simResult.distSaved > 0 ? `+${simResult.distSaved}` : simResult.distSaved} units | Pick Time Saved: {simResult.timeSaved > 0 ? `+${simResult.timeSaved}` : simResult.timeSaved}s
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- 7. REPLENISHMENT ALERTS COMPONENT ---
+    function ReplenishmentAlerts({ replenishment, products, onAdjustStock }) {
+      const [selectedSku, setSelectedSku] = useState(products && products[0] ? products[0].skuId : 'SKU006');
+      const [deltaQty, setDeltaQty] = useState(10);
+
+      if (!replenishment) return <div className="state-container"><div className="spinner"></div>Loading replenishment alerts...</div>;
+
+      const outOfStock = replenishment.filter(r => r.stockStatus === 'OUT_OF_STOCK');
+      const lowStock = replenishment.filter(r => r.stockStatus === 'LOW_STOCK');
+
+      const handleAddStock = () => {
+        if (onAdjustStock) onAdjustStock(selectedSku, Math.abs(Number(deltaQty)));
+      };
+
+      const handleRemoveStock = () => {
+        if (onAdjustStock) onAdjustStock(selectedSku, -Math.abs(Number(deltaQty)));
+      };
+
+      return (
+        <div className="section-card">
+          <div className="section-header">
+            <div>
+              <h2 className="section-title">7. Replenishment Alerts & Stock Health</h2>
+              <p className="section-desc">SKUs where Current_Stock ≤ Minimum_Stock requiring immediate replenishment</p>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <span className="badge" style={{ backgroundColor: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid #ef4444', padding: '0.4rem 0.8rem' }}>
+                🔴 Out of Stock: {outOfStock.length}
+              </span>
+              <span className="badge" style={{ backgroundColor: 'rgba(245,158,11,0.2)', color: '#fbbf24', border: '1px solid #f59e0b', padding: '0.4rem 0.8rem' }}>
+                🟠 Low Stock: {lowStock.length}
+              </span>
+            </div>
+          </div>
+
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>SKU ID</th>
+                  <th>Product Name</th>
+                  <th>Current Stock</th>
+                  <th>Minimum Stock</th>
+                  <th>Deficit</th>
+                  <th>Stock Status</th>
+                  <th>Action Required</th>
+                </tr>
+              </thead>
+              <tbody>
+                {replenishment.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '2rem', color: '#4ade80' }}>
+                      ✅ All inventory levels are healthy! No replenishment alerts active.
+                    </td>
+                  </tr>
+                ) : (
+                  replenishment.map(r => {
+                    const isOut = r.stockStatus === 'OUT_OF_STOCK';
+                    const deficit = r.minimumStock - r.currentStock;
+                    return (
+                      <tr key={r.skuId}>
+                        <td><strong>{r.skuId}</strong></td>
+                        <td>{r.productName}</td>
+                        <td style={{ color: isOut ? '#f87171' : '#fbbf24', fontWeight: 'bold' }}>{r.currentStock}</td>
+                        <td>{r.minimumStock}</td>
+                        <td style={{ color: '#f87171', fontWeight: 'bold' }}>-{deficit}</td>
+                        <td>
+                          <span className="badge" style={{
+                            backgroundColor: isOut ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                            color: isOut ? '#f87171' : '#fbbf24',
+                            border: `1px solid ${isOut ? '#ef4444' : '#f59e0b'}`
+                          }}>
+                            {r.stockStatus}
+                          </span>
+                        </td>
+                        <td><span className="badge" style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171' }}>{r.replenishmentRequired}</span></td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Interactive Stock Count Adjustment Console */}
+          <div style={{ marginTop: '2rem', padding: '1.25rem', background: '#0f172a', borderRadius: '8px', border: '1px solid #f59e0b' }}>
+            <h3 style={{ color: '#fbbf24', fontSize: '1.1rem', marginBottom: '0.4rem' }}>📦 Stock Count & Restock Management Console</h3>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              Simulate adding stock (+ Restock) or removing stock (- Fulfill/Pick) for any SKU. Watch the replenishment alert status update live!
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={selectedSku}
+                onChange={e => setSelectedSku(e.target.value)}
+                style={{ background: '#1e293b', border: '1px solid #f59e0b', color: '#f8fafc', padding: '0.45rem 0.8rem', borderRadius: '6px', fontSize: '0.9rem' }}
+              >
+                {(products || []).map(p => (
+                  <option key={p.skuId} value={p.skuId}>
+                    {p.skuId} - {p.productName}
+                  </option>
+                ))}
+              </select>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Units:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={deltaQty}
+                  onChange={e => setDeltaQty(Number(e.target.value))}
+                  style={{ width: '70px', background: '#1e293b', border: '1px solid #334155', color: '#f8fafc', padding: '0.45rem', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="btn btn-approve" onClick={handleAddStock} style={{ padding: '0.45rem 1rem' }}>
+                  + Restock (+{deltaQty})
+                </button>
+                <button className="btn btn-reject" onClick={handleRemoveStock} style={{ padding: '0.45rem 1rem' }}>
+                  - Dispatch/Pick (-{deltaQty})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- 8. SUPERVISOR APPROVAL COMPONENT ---
+    function SupervisorApproval({ recommendations, onApprove, onReject, toast }) {
+      if (!recommendations) return <div className="state-container"><div className="spinner"></div>Loading approvals...</div>;
+
+      const pending = recommendations.filter(r => r.recommendationStatus === 'RECOMMENDED');
+      const approved = recommendations.filter(r => r.recommendationStatus === 'APPROVED');
+      const rejected = recommendations.filter(r => r.recommendationStatus === 'REJECTED');
+
+      return (
+        <div>
+          {toast && (
+            <div className={`toast-alert ${toast.type === 'success' ? 'toast-success' : 'toast-error'}`}>
+              <span>{toast.message}</span>
+            </div>
+          )}
+
+          <div className="section-card">
+            <div className="section-header">
+              <div>
+                <h2 className="section-title">8. Supervisor Approval Queue</h2>
+                <p className="section-desc">Review and approve/reject recommended slot relocations. Actions are transactional.</p>
+              </div>
+            </div>
+
+            {pending.length === 0 ? (
+              <div className="state-container" style={{ padding: '2rem' }}>
+                <p style={{ color: '#4ade80', fontSize: '1.1rem', fontWeight: '600' }}>✅ All recommendations have been resolved</p>
+                <p style={{ color: '#94a3b8', marginTop: '0.5rem' }}>No pending approvals remain in the queue.</p>
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Rec ID</th>
+                      <th>SKU</th>
+                      <th>Product</th>
+                      <th>Class</th>
+                      <th>Current Bin</th>
+                      <th>Proposed Bin</th>
+                      <th>Distance</th>
+                      <th>Reason</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pending.map(r => (
+                      <tr key={r.recommendationId}>
+                        <td><strong>{r.recommendationId}</strong></td>
+                        <td>{r.skuId}</td>
+                        <td>{r.productName}</td>
+                        <td><span className={`badge badge-${r.demandClass.toLowerCase()}`}>{r.demandClass}</span></td>
+                        <td><span className="badge badge-occupied">{r.currentLocation}</span></td>
+                        <td><span className="badge badge-empty">{r.recommendedLocation}</span></td>
+                        <td>{r.distance} units</td>
+                        <td style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{r.reason}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button className="btn btn-approve" onClick={() => onApprove(r.recommendationId)}>✓ Approve</button>
+                            <button className="btn btn-reject" onClick={() => onReject(r.recommendationId)}>✗ Reject</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- 9. PERFORMANCE ANALYTICS COMPONENT ---
+    function PerformanceAnalytics({ analytics, routes, recommendations, replenishment }) {
+      if (!analytics) return <div className="state-container"><div className="spinner"></div>Loading performance analytics...</div>;
+
+      const improvedRoutes = routes ? routes.filter(r => r.routeStatus === 'IMPROVED').length : 0;
+      const worseRoutes = routes ? routes.filter(r => r.routeStatus === 'WORSE').length : 0;
+      const identicalRoutes = routes ? routes.filter(r => r.routeStatus === 'IDENTICAL').length : 0;
+      const totalRoutes = routes ? routes.length : 0;
+
+      const avgBaseline = routes && routes.length > 0 ? (routes.reduce((s, r) => s + r.baselineDistance, 0) / routes.length).toFixed(2) : 0;
+      const avgOptimized = routes && routes.length > 0 ? (routes.reduce((s, r) => s + r.optimizedDistance, 0) / routes.length).toFixed(2) : 0;
+
+      const pct = (val, max) => max > 0 ? Math.round((val / max) * 100) : 0;
+
+      return (
+        <div>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            <div className="kpi-card">
+              <span className="kpi-label">Avg Baseline Dist</span>
+              <span className="kpi-value">{avgBaseline}</span>
+              <span className="kpi-subtext">Sequential route distance</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Avg Optimized Dist</span>
+              <span className="kpi-value" style={{ color: '#38bdf8' }}>{avgOptimized}</span>
+              <span className="kpi-subtext">Nearest Neighbor distance</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Mean Reduction</span>
+              <span className="kpi-value" style={{ color: '#4ade80' }}>{analytics.averageDistanceReductionPct}%</span>
+              <span className="kpi-subtext positive">Total Saved: {analytics.totalDistanceSaved} units</span>
+            </div>
+            <div className="kpi-card">
+              <span className="kpi-label">Suboptimal Edge Cases</span>
+              <span className="kpi-value" style={{ color: '#f87171' }}>{worseRoutes}</span>
+              <span className="kpi-subtext warning">NN heuristic worse than baseline</span>
+            </div>
+          </div>
+
+          <div className="section-card">
+            <div className="section-header">
+              <div>
+                <h2 className="section-title">9. Before / After Distance Comparison</h2>
+                <p className="section-desc">Comparison of baseline sequential travel distance vs Nearest Neighbor heuristic path</p>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#94a3b8', fontSize: '0.85rem', fontWeight: '600' }}>Baseline (Sequential)</span>
+                  <span style={{ color: '#f8fafc', fontWeight: '700' }}>{avgBaseline} units</span>
+                </div>
+                <div className="progress-bar-bg" style={{ height: '20px' }}>
+                  <div className="progress-bar-fill" style={{ width: '100%', backgroundColor: '#64748b' }}></div>
+                </div>
+              </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: '600' }}>Optimized (Nearest Neighbor)</span>
+                  <span style={{ color: '#38bdf8', fontWeight: '700' }}>{avgOptimized} units</span>
+                </div>
+                <div className="progress-bar-bg" style={{ height: '20px' }}>
+                  <div className="progress-bar-fill" style={{ width: `${avgBaseline > 0 ? Math.round((avgOptimized / avgBaseline) * 100) : 100}%`, backgroundColor: '#38bdf8' }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="section-card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+            <div className="section-header">
+              <h2 className="section-title" style={{ color: '#fbbf24' }}>⚠️ Heuristic Trade-offs & Limitations</h2>
+            </div>
+            <ul style={{ listStyleType: 'disc', paddingLeft: '1.2rem', color: '#94a3b8', fontSize: '0.85rem', lineHeight: '1.8' }}>
+              <li><strong>Euclidean Distance Approximation:</strong> Calculates straight-line travel. Physical warehouse walls, cross-aisle turns, and racking traversal are simplified.</li>
+              <li><strong>Greedy Suboptimal Results:</strong> In 5 of 50 orders (10%), Nearest Neighbor produces longer routes due to greedy early selections requiring longer return legs.</li>
+              <li><strong>Fixed Slot Availability:</strong> With only 10 empty locations in aisles D and E, relocations are constrained to outer warehouse perimeter slots.</li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      const [activeTab, setActiveTab] = useState('overview');
+      const [loading, setLoading] = useState(true);
+      const [backendOnline, setBackendOnline] = useState(false);
+      const [toast, setToast] = useState(null);
+
+      const [products, setProducts] = useState([]);
+      const [locations, setLocations] = useState([]);
+      const [demand, setDemand] = useState([]);
+      const [recommendations, setRecommendations] = useState([]);
+      const [routes, setRoutes] = useState([]);
+      const [replenishment, setReplenishment] = useState([]);
+      const [analytics, setAnalytics] = useState(null);
+
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4000);
+      };
+
+      const loadFallback = () => {
+        if (window.__SEED_DATA__) {
+          const s = window.__SEED_DATA__;
+          setProducts(s.products || []);
+          setLocations(s.locations || []);
+          setDemand(s.demand || []);
+          setRecommendations(s.recommendations || []);
+          setRoutes(s.routes || []);
+          setReplenishment(s.replenishment || []);
+          setAnalytics(s.analytics || null);
+        }
+      };
+
+      const loadData = useCallback(async () => {
+        setLoading(true);
+        try {
+          const [p, l, d, rec, rt, rep, a] = await Promise.all([
+            warehouseApi.getProducts().catch(() => null),
+            warehouseApi.getLocations().catch(() => null),
+            warehouseApi.getDemand().catch(() => null),
+            warehouseApi.getSlotRecommendations().catch(() => null),
+            warehouseApi.getAllRoutes().catch(() => null),
+            warehouseApi.getReplenishmentAlerts().catch(() => null),
+            warehouseApi.getAnalytics().catch(() => null),
+          ]);
+
+          if (p && l && a) {
+            setProducts(p);
+            setLocations(l);
+            setDemand(d || []);
+            setRecommendations(rec || []);
+            setRoutes(rt || []);
+            setReplenishment(rep || []);
+            setAnalytics(a);
+            setBackendOnline(true);
+          } else {
+            loadFallback();
+            setBackendOnline(false);
+          }
+        } catch (err) {
+          loadFallback();
+          setBackendOnline(false);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        loadData();
+      }, [loadData]);
+
+      const handleApprove = async (id) => {
+        try {
+          if (backendOnline) {
+            const resp = await warehouseApi.approveSlot(id);
+            showToast(resp.message || `Slot ${id} approved successfully`, 'success');
+            const [updatedRecs, updatedAnalytics] = await Promise.all([
+              warehouseApi.getSlotRecommendations(),
+              warehouseApi.getAnalytics()
+            ]);
+            setRecommendations(updatedRecs);
+            setAnalytics(updatedAnalytics);
+          } else {
+            setRecommendations(prev => prev.map(r => r.recommendationId === id ? { ...r, recommendationStatus: 'APPROVED' } : r));
+            showToast(`Slot recommendation ${id} approved (preview update)`, 'success');
+          }
+        } catch (e) {
+          showToast(e.message || 'Approval failed', 'error');
+        }
+      };
+
+      const handleReject = async (id) => {
+        try {
+          if (backendOnline) {
+            const resp = await warehouseApi.rejectSlot(id);
+            showToast(resp.message || `Slot ${id} rejected`, 'success');
+            const [updatedRecs, updatedAnalytics] = await Promise.all([
+              warehouseApi.getSlotRecommendations(),
+              warehouseApi.getAnalytics()
+            ]);
+            setRecommendations(updatedRecs);
+            setAnalytics(updatedAnalytics);
+          } else {
+            setRecommendations(prev => prev.map(r => r.recommendationId === id ? { ...r, recommendationStatus: 'REJECTED' } : r));
+            showToast(`Slot recommendation ${id} rejected (preview update)`, 'success');
+          }
+        } catch (e) {
+          showToast(e.message || 'Rejection failed', 'error');
+        }
+      };
+
+      const handleVacateLocation = (locationId) => {
+        setLocations(prev => prev.map(l => l.locationId === locationId ? { ...l, status: 'EMPTY' } : l));
+        setProducts(prev => prev.map(p => p.currentLocation === locationId ? { ...p, currentLocation: 'UNASSIGNED' } : p));
+        setAnalytics(prev => prev ? {
+          ...prev,
+          occupiedLocations: Math.max(0, prev.occupiedLocations - 1),
+          emptyLocations: prev.emptyLocations + 1
+        } : prev);
+        showToast(`Location ${locationId} vacated to EMPTY. Product unassigned.`, 'success');
+      };
+
+      const handleAdjustStock = (skuId, delta) => {
+        setReplenishment(prev => {
+          const existing = prev.find(r => r.skuId === skuId);
+          let newStock = 0;
+          let minStock = 10;
+          let prodName = skuId;
+
+          if (existing) {
+            newStock = Math.max(0, existing.currentStock + delta);
+            minStock = existing.minimumStock;
+            prodName = existing.productName;
+          } else {
+            const p = products.find(x => x.skuId === skuId);
+            prodName = p ? p.productName : skuId;
+            newStock = Math.max(0, 15 + delta);
+            minStock = 10;
+          }
+
+          const status = newStock === 0 ? 'OUT_OF_STOCK' : (newStock <= minStock ? 'LOW_STOCK' : 'HEALTHY');
+          const isAlert = newStock <= minStock;
+
+          let updated;
+          if (isAlert) {
+            const newItem = {
+              skuId,
+              productName: prodName,
+              currentStock: newStock,
+              minimumStock: minStock,
+              stockStatus: status,
+              replenishmentRequired: 'YES'
+            };
+            if (existing) {
+              updated = prev.map(r => r.skuId === skuId ? newItem : r);
+            } else {
+              updated = [...prev, newItem];
+            }
+          } else {
+            // Cleared alert
+            updated = prev.filter(r => r.skuId !== skuId);
+          }
+
+          showToast(`${delta > 0 ? 'Restocked (+)' : 'Picked/Removed (-)'} ${Math.abs(delta)} units of ${skuId}. Current stock: ${newStock} (${status}).`, isAlert ? 'error' : 'success');
+          return updated;
+        });
+      };
+
+      const counts = {
+        products: products.length,
+        locations: locations.length,
+        demand: demand.length,
+        recommendations: recommendations.length,
+        routes: routes.length,
+        replenishment: replenishment.length,
+        pendingApproval: recommendations.filter(r => r.recommendationStatus === 'RECOMMENDED').length
+      };
+
+      return (
+        <div className="dashboard-container">
+          <Header analytics={analytics} backendOnline={backendOnline} />
+          <Navbar activeTab={activeTab} setActiveTab={setActiveTab} counts={counts} />
+          <main className="main-content">
+            {loading ? (
+              <div className="state-container">
+                <div className="spinner"></div>
+                <p>Loading CAP-12 Warehouse Management System...</p>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'overview' && <WarehouseOverview analytics={analytics} />}
+                {activeTab === 'products' && <ProductMaster products={products} />}
+                {activeTab === 'locations' && <WarehouseLocations locations={locations} onVacateLocation={handleVacateLocation} />}
+                {activeTab === 'demand' && <DemandClassification demand={demand} />}
+                {activeTab === 'recommendations' && (
+                  <SlotRecommendations recommendations={recommendations} onApprove={handleApprove} onReject={handleReject} />
+                )}
+                {activeTab === 'pickpath' && <PickPathOptimization routes={routes} products={products} locations={locations} />}
+                {activeTab === 'replenishment' && <ReplenishmentAlerts replenishment={replenishment} products={products} onAdjustStock={handleAdjustStock} />}
+                {activeTab === 'approval' && (
+                  <SupervisorApproval recommendations={recommendations} onApprove={handleApprove} onReject={handleReject} toast={toast} />
+                )}
+                {activeTab === 'analytics' && (
+                  <PerformanceAnalytics analytics={analytics} routes={routes} recommendations={recommendations} replenishment={replenishment} />
+                )}
+              </>
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    const rootElement = document.getElementById('root');
+    ReactDOM.createRoot(rootElement).render(<App />);
+  </script>
+</body>
+</html>
